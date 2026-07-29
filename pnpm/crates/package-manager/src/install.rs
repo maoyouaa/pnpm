@@ -1226,10 +1226,10 @@ where
         // would hide the change of a real install creating `pnpm-lock.yaml`.
         let existing_wanted_lockfile = lockfile;
         let lockfile = lockfile.or(synthesized_lockfile.as_ref());
-        let can_fast_update_importers =
+        let can_fast_update_lockfile =
             !frozen_lockfile && !dry_run && prefer_frozen_lockfile && mutation.is_full_install();
-        let fast_updated_lockfile = if can_fast_update_importers {
-            try_fast_update_importer_lockfile(FastUpdateImporterLockfileOptions {
+        let fast_updated_lockfile = if can_fast_update_lockfile {
+            try_fast_update_lockfile(FastUpdateLockfileOptions {
                 lockfile,
                 manifests: &manifest_freshness_inputs,
                 config,
@@ -2623,7 +2623,7 @@ where
     }
 }
 
-struct FastUpdateImporterLockfileOptions<'a, 'manifest> {
+struct FastUpdateLockfileOptions<'a, 'manifest> {
     lockfile: Option<&'a Lockfile>,
     manifests: &'a [(String, &'manifest PackageManifest)],
     config: &'a Config,
@@ -2632,12 +2632,20 @@ struct FastUpdateImporterLockfileOptions<'a, 'manifest> {
     ignore_manifest_check: bool,
 }
 
-async fn try_fast_update_importer_lockfile(
-    opts: FastUpdateImporterLockfileOptions<'_, '_>,
-) -> Option<Lockfile> {
+async fn try_fast_update_lockfile(opts: FastUpdateLockfileOptions<'_, '_>) -> Option<Lockfile> {
     let lockfile = opts.lockfile?;
-    let candidate =
-        crate::fast_update_importers::try_fast_update_importers(lockfile, opts.manifests)?;
+    let importer_candidate =
+        crate::fast_update_importers::try_fast_update_importers(lockfile, opts.manifests);
+    let ignored_optional_candidate =
+        crate::fast_update_ignored_optional_dependencies::try_fast_update_ignored_optional_dependencies(
+            lockfile,
+            opts.config.ignored_optional_dependencies.as_deref().unwrap_or_default(),
+        );
+    let ((Some(candidate), None) | (None, Some(candidate))) =
+        (importer_candidate, ignored_optional_candidate)
+    else {
+        return None;
+    };
     check_lockfile_freshness(
         &candidate,
         opts.manifests,

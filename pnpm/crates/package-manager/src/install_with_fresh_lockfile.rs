@@ -48,7 +48,7 @@ use pacquet_resolving_tarball_resolver::{PriorTarballEntry, TarballFetchContext,
 use pacquet_store_dir::{SharedVerifiedFilesCache, StoreIndex, StoreIndexWriter, store_index_key};
 use pacquet_tarball::{MemCache, SharedReportedProgressKeys};
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     path::Path,
     sync::{Arc, atomic::AtomicU8},
 };
@@ -1395,8 +1395,13 @@ impl<DependencyGroupList> InstallWithFreshLockfile<'_, DependencyGroupList> {
             FastCatalogUpdate::Updated(lockfile) => (false, Some(*lockfile)),
             FastCatalogUpdate::Unsupported => (false, None),
         };
-        let reusable_settings_lockfile = wanted_lockfile
-            .filter(|lockfile| lockfile.package_extensions_checksum == package_extensions_checksum);
+        let reusable_settings_lockfile = wanted_lockfile.filter(|lockfile| {
+            lockfile.package_extensions_checksum == package_extensions_checksum
+                && ignored_optional_dependencies_match(
+                    lockfile.ignored_optional_dependencies.as_deref(),
+                    config.ignored_optional_dependencies.as_deref(),
+                )
+        });
         let override_settings_match = reusable_settings_lockfile.is_some_and(|lockfile| {
             overrides_match(lockfile.overrides.as_ref(), resolved_overrides.as_ref())
         });
@@ -2948,6 +2953,12 @@ fn overrides_match(
         }
         _ => false,
     }
+}
+
+fn ignored_optional_dependencies_match(left: Option<&[String]>, right: Option<&[String]>) -> bool {
+    let left: HashSet<_> = left.unwrap_or_default().iter().collect();
+    let right: HashSet<_> = right.unwrap_or_default().iter().collect();
+    left == right
 }
 
 fn compose_manifest_hooks(
