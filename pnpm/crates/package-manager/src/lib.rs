@@ -16,6 +16,7 @@ mod deps_graph;
 mod fast_update_catalogs;
 mod fast_update_importers;
 mod fast_update_overrides;
+mod fast_update_settings;
 mod graph_sequencer;
 mod hoist;
 mod hoisted_dep_graph;

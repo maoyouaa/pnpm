@@ -1260,12 +1260,13 @@ where
         // would hide the change of a real install creating `pnpm-lock.yaml`.
         let existing_wanted_lockfile = lockfile;
         let lockfile = lockfile.or(synthesized_lockfile.as_ref());
-        let can_fast_update_importers =
+        let can_fast_update_lockfile =
             !frozen_lockfile && !dry_run && prefer_frozen_lockfile && mutation.is_full_install();
-        let fast_updated_lockfile = if can_fast_update_importers {
-            try_fast_update_importer_lockfile(FastUpdateImporterLockfileOptions {
+        let fast_updated_lockfile = if can_fast_update_lockfile {
+            try_fast_update_lockfile(FastUpdateLockfileOptions {
                 lockfile,
                 manifests: &manifest_freshness_inputs,
+                project_manifests: &project_manifests,
                 config,
                 catalogs: &catalogs,
                 pnpmfile_hook: pnpmfile_hook.as_ref(),
@@ -2668,21 +2669,34 @@ where
     }
 }
 
-struct FastUpdateImporterLockfileOptions<'a, 'manifest> {
+struct FastUpdateLockfileOptions<'a, 'manifest> {
     lockfile: Option<&'a Lockfile>,
     manifests: &'a [(String, &'manifest PackageManifest)],
+    project_manifests: &'a [(PathBuf, &'manifest PackageManifest)],
     config: &'a Config,
     catalogs: &'a Catalogs,
     pnpmfile_hook: Option<&'a Arc<dyn pacquet_hooks::PnpmfileHooks>>,
     ignore_manifest_check: bool,
 }
 
-async fn try_fast_update_importer_lockfile(
-    opts: FastUpdateImporterLockfileOptions<'_, '_>,
-) -> Option<Lockfile> {
+/// Rewrite the loaded lockfile in place of a full resolution for the
+/// drift the lockfile itself proves is safe to absorb: a compatible
+/// direct-dependency range change, or a setting change that cannot
+/// affect the recorded graph. The candidate only replaces the loaded
+/// lockfile once it passes every freshness gate, so a handler that
+/// rewrites too much falls back to the resolver instead of committing.
+async fn try_fast_update_lockfile(opts: FastUpdateLockfileOptions<'_, '_>) -> Option<Lockfile> {
     let lockfile = opts.lockfile?;
     let candidate =
-        crate::fast_update_importers::try_fast_update_importers(lockfile, opts.manifests)?;
+        crate::fast_update_importers::try_fast_update_importers(lockfile, opts.manifests).or_else(
+            || {
+                crate::fast_update_settings::try_fast_update_settings(
+                    lockfile,
+                    &crate::fast_update_settings::lockfile_settings_from_config(opts.config),
+                    opts.project_manifests,
+                )
+            },
+        )?;
     check_lockfile_freshness(
         &candidate,
         opts.manifests,
